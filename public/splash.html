@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, maximum-scale=1, minimum-scale=1, user-scalable=no">
+    <title>Daily Thaw</title>
+    <link rel="modulepreload" href="splash.js">
+    <style>
+      html,body{margin:0;height:100dvh;overflow:hidden;font-family:'Courier New',monospace;
+        background:radial-gradient(120% 90% at 50% 15%,#12263a 0%,#0a1622 55%,#05080b 100%);color:#dff4ff}
+      main{height:100dvh;display:grid;place-items:center;text-align:center;padding:1rem;box-sizing:border-box}
+      .wrap{display:grid;gap:.9rem;justify-items:center;max-width:340px}
+      h1{margin:0;font-size:2.1rem;letter-spacing:1px;text-shadow:0 0 18px rgba(150,225,255,.5)}
+      .puzzle{color:#8fc4e0;font-size:.8rem;letter-spacing:2px}
+      .peng{width:84px;height:84px;image-rendering:pixelated;filter:drop-shadow(0 0 12px rgba(150,225,255,.35))}
+      .tag{color:#cde3ee;font-size:.85rem;line-height:1.5;opacity:.9}
+      .ice{color:#9ad2eb;font-size:.9rem;letter-spacing:1px}
+      button{margin-top:.4rem;font-family:inherit;font-weight:bold;font-size:1.05rem;color:#dff4ff;
+        background:rgba(150,225,255,.16);border:2px solid rgba(150,225,255,.7);border-radius:10px;
+        padding:.7rem 2.2rem;cursor:pointer;letter-spacing:1px;transition:background .15s}
+      button:hover{background:rgba(150,225,255,.28)}
+      .hint{color:#7f9aad;font-size:.7rem;opacity:.8}
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="wrap">
+        <h1>DAILY THAW</h1>
+        <div class="puzzle" id="puzzle">#000</div>
+        <img class="peng" id="peng" alt="penguin">
+        <div class="ice" id="ice">ICE ░░░░░</div>
+        <div class="tag">A new ice bar every day.<br>Same slippery board for everyone.</div>
+        <button id="start-btn" type="button">START</button>
+        <div class="hint">tap &amp; drag each half to tilt the bar</div>
+      </div>
+    </main>
+    <script src="splash.js" type="module"></script>
+  </body>
+</html>

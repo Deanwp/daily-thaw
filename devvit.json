@@ -1,0 +1,39 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "daily-thaw",
+  "post": {
+    "entrypoints": {
+      "default": {
+        "entry": "splash.html"
+      },
+      "game": {
+        "entry": "game.html"
+      }
+    }
+  },
+  "server": {},
+  "permissions": {
+    "reddit": {
+      "asUser": ["SUBMIT_POST", "SUBMIT_COMMENT"]
+    }
+  },
+  "menu": {
+    "items": [
+      {
+        "label": "[daily-thaw] New Post",
+        "description": "Create a new daily-thaw post.",
+        "location": "subreddit",
+        "endpoint": "/internal/on/menu/new-post"
+      }
+    ]
+  },
+  "triggers": {
+    "onAppInstall": "/internal/on/app/install"
+  },
+  "scripts": {
+    "dev": "npm run watch"
+  },
+  "dev": {
+    "subreddit": "daily_thaw_dev"
+  }
+}
