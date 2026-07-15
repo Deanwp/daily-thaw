@@ -43,7 +43,7 @@ export function maxBankedSec(holesSunk: number, iceLvl: number): number {
   return s;
 }
 export const PENALTY = 5;              // seconds docked per fire vent
-export const ICE_TIERS = [2.35, 2.15, 2.00, 1.80, 1.65]; // tier 1..5; tier 5 eased from 0.70 (10x) to 0.95 (7.4x)
+export const ICE_TIERS = [2.55, 2.35, 2.20, 2.00, 1.85]; // tier 1..5; tier 5 eased from 0.70 (10x) to 0.95 (7.4x)
 
 // Geometry is expressed in normalised units so it is resolution-independent.
 export const SXA = 0.06, SXB = 0.94;   // decoy band — some hug the rails

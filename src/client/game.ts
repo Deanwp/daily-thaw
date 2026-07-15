@@ -45,7 +45,7 @@ let railX0,railX1,yTop,yBottom;
 function layout(){railX0=W*0.17;railX1=W*0.83;yTop=H*0.12;yBottom=H*0.90;BALL_R=11;HOLE_R=BALL_R*0.82;CAP=HOLE_R;}
 
 /* ---- tunables ---- */
-const STEP=1/120,GRAV=2300,END_SPEED=120,ROUNDS=5;
+const STEP=1/120,GRAV=2300,END_SPEED=90,ROUNDS=5;
 const FOLLOW=0.22;   // touch smoothing: bar eases toward the finger, no snapping
 let BALL_R=11,HOLE_R=9.0,CAP=9.0;
 const ICE_TIERS=[1.65,1.45,1.25,1.00,0.70]; // tier 1..5; even tier 1 is 4x slicker than a normal bar
@@ -83,7 +83,7 @@ let anchorL:number|null=null, anchorR:number|null=null;   // y where each thumb 
 let anchorLX=0, anchorRX=0;                                // x of the anchor (for drawing)
 let fingerLX=0, fingerLY=0, fingerRX=0, fingerRY=0;        // current finger pos (for drawing)
 let velL=0, velR=0;                                        // -1..1 proportional lever output
-const STICK_RANGE=65;   // px of drag for full-speed lever (smaller = more sensitive)
+const STICK_RANGE=45;   // px of drag for full-speed lever (smaller = more sensitive)
 addEventListener("keydown",e=>{
   if(e.repeat)return;
   // keyboard controls the bar but NEVER starts the game — Start is button-only
