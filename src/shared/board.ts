@@ -1,25 +1,3 @@
-/**
- * ⚠️  BOARD GENERATOR — LOCKED FOR SUBMISSION (2026-07-13)
- *
- * Every constant below determines the daily board. Changing ANY of them
- * regenerates all past and future boards, which breaks daily consistency and
- * makes historical leaderboard scores incomparable.
- *
- * DO NOT EDIT after launch. If a change is truly required pre-launch, bump a
- * version and reset all `lb:*` / `u:*` Redis keys so no stale scores remain.
- *
- * Locked values, verified over 60 simulated days:
- *   ICE_TIERS  friction per tier (tier 5 = 7.4x slick)
- *   COLS/ROWS  7x7 stratified grid  (edge lanes closed, ~52 holes)
- *   MIN_D      0.064  (targets never smothered)
- *   ROUND_TIME 30s base + 5s/tier + 5s/target
- */
-/**
- * Shared board generator — the single source of truth for what a given day looks like.
- * Imported by BOTH the client (to draw) and the server (to validate).
- * Pure: no DOM, no Devvit, no Date.now(). The day string is always passed in.
- */
-
 export const ROUNDS = 5;
 export const ROUND_TIME = 30;          // base seconds for target 1 on the roughest ice
 export const TIER_BONUS = 5;           // +5s of base per ice tier (slicker ice = more time)
@@ -43,7 +21,9 @@ export function maxBankedSec(holesSunk: number, iceLvl: number): number {
   return s;
 }
 export const PENALTY = 5;              // seconds docked per fire vent
-export const ICE_TIERS = [2.55, 2.35, 2.20, 2.00, 1.85]; // tier 1..5; tier 5 eased from 0.70 (10x) to 0.95 (7.4x)
+export const ICE_TIERS = [2.55, 2.35, 2.20, 2.00, 1.85]; // tier 1..5; friction, so HIGHER = less slippery.
+                                                          // Keep every value >= ~0.90: below that the wall bounce
+                                                          // falls short of the edge zone and the zig-zag exploit returns.
 
 // Geometry is expressed in normalised units so it is resolution-independent.
 export const SXA = 0.06, SXB = 0.94;   // decoy band — some hug the rails
@@ -52,11 +32,11 @@ export const TGT_Y = [0.7, 0.55, 0.41, 0.27, 0.11];
 const COLS = 7, ROWS = 7;              // stratified grid -> no empty regions
 const HYA = 0.05, HYB = 0.83;
 
-export type Hole = { sx: number; hyN: number | any; kind: 'target' | 'decoy'; ord?: number };
+export type Hole = { sx: number; hyN: number; kind: 'target' | 'decoy'; ord?: number };
 export type Board = {
   day: string;
   iceLvl: number;      // 1..5
-  barFric: number | any; // 1.65..2.35
+  barFric: number;
   holes: Hole[];
   targetSeq: number[]; // indices into holes, ascending height
 };
@@ -98,11 +78,14 @@ function tooClose(a: Hole, b: Hole): boolean {
 export function buildBoard(day: string): Board {
   const rng = mulberry32(seedFromDay(day));
   const iceLvl = 1 + Math.floor(rng() * ICE_TIERS.length);
-  const barFric = ICE_TIERS[iceLvl - 1];
+  const barFric = ICE_TIERS[iceLvl - 1]!;
 
   const holes: Hole[] = [];
   for (let r = 0; r < TGT_Y.length; r++) {
-    holes.push({ sx: TXA + rng() * (TXB - TXA), hyN: TGT_Y[r], kind: 'target', ord: r });
+    // r is bounded by TGT_Y.length, and iceLvl by ICE_TIERS.length — the indexes are
+    // in range by construction. Assert rather than widen the type to `any`, which would
+    // silently switch off checking on the two values the whole board depends on.
+    holes.push({ sx: TXA + rng() * (TXB - TXA), hyN: TGT_Y[r]!, kind: 'target', ord: r });
   }
   for (let cy = 0; cy < ROWS; cy++) {
     for (let cx = 0; cx < COLS; cx++) {

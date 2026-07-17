@@ -2,7 +2,8 @@
 import {fetchDaily, fetchSubmitScore, fetchLeaderboard, fetchPostComment, formatCountdown} from './fetch.ts'
 import type {Board} from '../shared/api.ts'
 import {ART} from './atlas.ts'
-import {roundTime} from '../shared/board.ts'
+import {roundTime, ROUNDS, PENALTY} from '../shared/board.ts'
+import * as SFX from './sfx.ts'
 
 // ---- asset atlas (base64) ----
 const IMG:Record<string,HTMLImageElement>={}, NEED=Object.keys(ART)
@@ -25,17 +26,26 @@ let myRank:number|undefined
 let lbRows:{rank:number,name:string,holesSunk:number,bankedMs:number}[]=[]
 let lbYou:{rank:number,name:string,holesSunk:number,bankedMs:number}|undefined
 let lbLoading=false
+let boardState:'loading'|'ready'|'error'='loading'
 let shareBtn:{x:number,y:number,w:number,h:number}|null=null
 let commentBtn:{x:number,y:number,w:number,h:number}|null=null
 let shareToast=0
 let commentState:'idle'|'posting'|'done'|'error'='idle'
+let muteBtn:{x:number,y:number,w:number,h:number}|null=null
+let lastTickSec=-1
 
 "use strict";
 let W=440,H=660,dpr=1;
+const ASPECT=1.5;        // H/W. LOCKED: the bar is 0.66*W and the playfield is H, so a
+                         // squashed canvas makes the bar relatively longer and the ball
+                         // travels further. Same board, different physics — never allow it.
+const W_MAX=440;         // caps how far scale (and with it, difficulty) can drift
 function resize(){
   const vw=window.innerWidth||440,vh=window.innerHeight||660;
-  W=Math.max(240,Math.min(vw-16,440));
-  H=Math.max(340,Math.min(Math.round(W*1.5),Math.max(340,vh-16)));
+  // Largest ASPECT-locked box that fits BOTH dimensions. Fit, never stretch.
+  const availW=Math.max(240,vw-16), availH=Math.max(340,vh-16);
+  W=Math.max(240,Math.min(availW,Math.round(availH/ASPECT),W_MAX));
+  H=Math.round(W*ASPECT);
   dpr=Math.min(window.devicePixelRatio||1,2);
   cv.style.width=W+"px";cv.style.height=H+"px";
   cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);
@@ -45,14 +55,10 @@ let railX0,railX1,yTop,yBottom;
 function layout(){railX0=W*0.17;railX1=W*0.83;yTop=H*0.12;yBottom=H*0.90;BALL_R=11;HOLE_R=BALL_R*0.82;CAP=HOLE_R;}
 
 /* ---- tunables ---- */
-const STEP=1/120,GRAV=2300,END_SPEED=90,ROUNDS=5;
-const FOLLOW=0.22;   // touch smoothing: bar eases toward the finger, no snapping
+const STEP=1/120,GRAV=2300,END_SPEED=90;   // ROUNDS/PENALTY come from board.ts — one definition only
 let BALL_R=11,HOLE_R=9.0,CAP=9.0;
-const ICE_TIERS=[1.65,1.45,1.25,1.00,0.70]; // tier 1..5; even tier 1 is 4x slicker than a normal bar
 const REST=0.62,DMIN_FRAC=0.23,FLOOR=30,KICK_MAX=520; // decay + tilt-aware minimum bounce distance
-const ROUND_TIME=30;                     // countdown per target
 const IMMUNE=0.25;                       // short grace; plugged holes do the real work
-const PENALTY=5;                         // seconds docked for a fire vent
 
 
 
@@ -72,7 +78,11 @@ function toBottom(){
   anchorL=null;anchorR=null;velL=0;velR=0;   // release the stick on reset; must re-touch to steer
 }
 function reset(){if(HOLES)for(const h of HOLES)h.plugged=false;
-  penFx=0;toBottom();bank=0;round=0;left=roundTime(0,iceLvl);score=0;running=false;done=false;started=false;shake=0;flash=0;bump=0;wrongHoles=0;submitted=false;runStart=performance.now();}
+  penFx=0;toBottom();bank=0;round=0;left=roundTime(0,iceLvl);score=0;running=false;done=false;started=false;shake=0;flash=0;bump=0;wrongHoles=0;submitted=false;runStart=performance.now();
+  // Clear last run's results too, or the old rank/leaderboard lingers on the next
+  // score screen — and commentState stuck on 'done' blocks doComment() from ever
+  // upserting a better score, which is the whole point of the one-per-day comment.
+  myRank=undefined;lbRows=[];lbYou=undefined;lbLoading=false;commentState='idle';shareToast=0;lastTickSec=-1;SFX.sfxRailStop();}
 flick=0;
 
 /* ---- input ---- */
@@ -99,12 +109,22 @@ addEventListener("keyup",e=>{
 });
 function begin(){
   if(done)return;            // on the score screen, taps do nothing — use the Play again button
+  SFX.unlock();              // must happen inside the gesture — browsers refuse otherwise
   started=true;running=true;
 }
-function playAgain(){reset();started=true;running=true;}
+function playAgain(){SFX.unlock();reset();started=true;running=true;}
 function ptr(e,down){
   if(down)refreshRect();               // rect only changes on new touch, not every move
   const r=cvRect,ts=e.touches?e.touches:[e];
+
+  // Mute is checked before anything else and in every state — a player who wants
+  // silence must never have to hunt for it, or start a run to reach the button.
+  if(down && muteBtn){
+    for(const t of ts){
+      const x=t.clientX-r.left, y=t.clientY-r.top;
+      if(hit(muteBtn,x,y)){ SFX.unlock(); SFX.toggleMute(); return; }
+    }
+  }
 
   // menu / start taps use the down event and the button rects (unchanged)
   if(done){
@@ -153,6 +173,7 @@ cv.addEventListener("touchend",e=>{ptr(e,false);},{passive:false});
 let cvRect=cv.getBoundingClientRect();
 function refreshRect(){cvRect=cv.getBoundingClientRect();}
 addEventListener("scroll",refreshRect,{passive:true});
+SFX.bindVisibility();   // scrolled away / tabbed out -> go quiet (Devvit rule)
 let md=false;
 cv.addEventListener("mousedown",e=>{md=true;ptr(e,true);});
 cv.addEventListener("mousemove",e=>{if(md)ptr(e,false);});
@@ -168,7 +189,7 @@ function moveEnd(y,stick,key){
 }
 function nextRound(){
   round++;
-  if(round>=ROUNDS){done=true;running=false;doneAt=performance.now();submitScore();return;}
+  if(round>=ROUNDS){done=true;running=false;doneAt=performance.now();SFX.sfxRailStop();SFX.sfxDone();submitScore();return;}
   left=roundTime(round,iceLvl);immune=IMMUNE;
 }
 /** True if the swept path A->B passes within r of centre C (segment-circle test). */
@@ -185,9 +206,15 @@ function segHitsHole(ax:number,ay:number,bx:number,by:number,cx:number,cy:number
 function update(){
   if(!running||done)return;
   left-=STEP; if(immune>0)immune-=STEP; if(bump>0)bump-=STEP; if(penFx>0)penFx-=STEP;
+  const sec=Math.ceil(left);
+  if(left<10 && left>0 && sec!==lastTickSec){ lastTickSec=sec; SFX.sfxTick(); }
   if(left<=0){ left=0; toBottom(); nextRound(); return; }   // time up -> round lost
 
+  // Rail hum follows how far the bar actually travelled, so a bar pinned against
+  // a rail stays silent even while the stick is held hard against it.
+  const yLp=yL, yRp=yR;
   yL=moveEnd(yL,velL,keyL);yR=moveEnd(yR,velR,keyR);
+  SFX.sfxRail((Math.abs(yL-yLp)+Math.abs(yR-yRp))/(2*END_SPEED*STEP));
   const dx=railX1-railX0,dy=yR-yL,L=Math.hypot(dx,dy);
   v+=GRAV*(dy/L)*STEP;
   v*=Math.max(0,1-barFric*STEP);
@@ -209,6 +236,7 @@ function update(){
     out=Math.min(KICK_MAX,out);
     s=atLeft?0:1; v=atLeft?out:-out;
     bump=0.18;shake=Math.min(7,out/70);
+    SFX.sfxBump(out/KICK_MAX);
   }
   if(!Number.isFinite(s)||!Number.isFinite(v)){s=0.5;v=0;}
 
@@ -222,12 +250,12 @@ function update(){
     if(HOLES[i].plugged) continue;                 // sealed: the ball rolls straight over it
     if(segHitsHole(bxPrev,byPrev,bx,by,hX(HOLES[i]),hY(HOLES[i]),CAP)){
       if(i===TARGET_SEQ[round]){
-        score++;bank+=left;flash=0.4;flashCol="ok";shake=8;
+        score++;bank+=left;flash=0.4;flashCol="ok";shake=8;SFX.sfxSink();
         HOLES[i].plugged=true;               // plug it: visible progress, safe on the way back up
         v=0;immune=IMMUNE;                 // carry over: keep altitude, keep position
         nextRound();
       }else{
-        flash=0.4;flashCol="bad";shake=16;penFx=0.9;wrongHoles++;
+        flash=0.4;flashCol="bad";shake=16;penFx=0.9;wrongHoles++;SFX.sfxVent();
         left-=PENALTY;                     // fire vent docks 5s
         if(left<=0){left=0;toBottom();nextRound();}   // nothing left -> round burns
         else toBottom();                   // drop to bottom, clock keeps running
@@ -357,11 +385,11 @@ function startOverlay(){
   ctx.fillStyle="rgba(150,225,255,.18)";rr(bx,by,bw,bh,10);ctx.fill();
   ctx.strokeStyle="rgba(150,225,255,.7)";ctx.lineWidth=2;rr(bx,by,bw,bh,10);ctx.stroke();
   ctx.fillStyle="#dff4ff";ctx.font="bold 18px 'Courier New',monospace";
-  ctx.textBaseline="middle";ctx.fillText(yourBest?"PLAY AGAIN":"START",W/2,by+bh/2);ctx.textBaseline="alphabetic";
+  ctx.textBaseline="middle";ctx.fillText("START",W/2,by+bh/2);ctx.textBaseline="alphabetic";
 
   // control legend under the button
   ctx.fillStyle="rgba(150,175,190,.6)";ctx.font="11px 'Courier New',monospace";
-  ctx.fillText("tap & drag each half   \u00b7   or  W S  /  \u2191 \u2193",W/2,by+bh+22);
+  ctx.fillText("hold each side \u00b7 drag to steer \u00b7 W S / \u2191 \u2193",W/2,by+bh+22);
   ctx.restore();
 }
 function resultsPanel(){
@@ -468,6 +496,15 @@ function hud(){
   ctx.fillStyle="rgba(5,8,11,.6)";ctx.fillRect(10,H-46,120,18);
   ctx.fillStyle="rgba(150,200,220,.8)";
   ctx.fillText("ICE  "+"█".repeat(iceLvl)+"░".repeat(5-iceLvl),16,H-34);
+  // mute toggle — Devvit asks every game with sound to carry one
+  const mw=30,mh=22,mx=W-mw-12,my=H-48;
+  muteBtn={x:mx,y:my,w:mw,h:mh};
+  ctx.fillStyle="rgba(5,8,11,.6)";rr(mx,my,mw,mh,5);ctx.fill();
+  ctx.strokeStyle="rgba(150,200,220,.28)";ctx.lineWidth=1;rr(mx,my,mw,mh,5);ctx.stroke();
+  ctx.fillStyle="rgba(150,200,220,.85)";ctx.font="12px 'Courier New',monospace";
+  ctx.textAlign="center";ctx.textBaseline="middle";
+  ctx.fillText(SFX.isMuted()?"\uD83D\uDD07":"\uD83D\uDD0A",mx+mw/2,my+mh/2+1);
+  ctx.textBaseline="alphabetic";
   const danger=left<10;
   ctx.textAlign="right";ctx.fillStyle="rgba(150,175,190,.55)";ctx.font="9px 'Courier New',monospace";
   ctx.fillText("TIME",W-16,14);
@@ -492,13 +529,39 @@ function hud(){
     // dark band so the bottom hint never clashes with holes/the bar
     ctx.fillStyle="rgba(5,8,11,.72)";ctx.fillRect(0,H-26,W,26);
     ctx.textAlign="center";ctx.fillStyle="rgba(170,195,210,.7)";ctx.font="10px 'Courier New',monospace";
-    ctx.fillText("drag each half  \u00b7  W S / \u2191 \u2193  \u2014  fire vents drop you",W/2,H-9);
+    ctx.fillText("hold & drag  \u00b7  W S / \u2191 \u2193  \u2014  fire vents drop you",W/2,H-9);
   }
   if(done){
     resultsPanel();
   }
 }
+function loadingScreen(){
+  ctx.save();
+  ctx.fillStyle="#05080b";ctx.fillRect(0,0,W,H);
+  ctx.textAlign="center";
+  ctx.shadowColor="rgba(150,225,255,.45)";ctx.shadowBlur=16;
+  ctx.fillStyle="#dff4ff";ctx.font="bold 26px 'Courier New',monospace";
+  ctx.fillText("DAILY THAW",W/2,H*0.40);
+  ctx.shadowBlur=0;
+  if(artReady){
+    const d=Math.min(W,H)*0.13, bob=Math.sin(flick*2.4)*4;   // gentle bob while waiting
+    ctx.drawImage(IMG.penguin,W/2-d/2,H*0.46+bob,d,d);
+  }
+  if(boardState==='error'){
+    ctx.fillStyle="rgba(255,140,110,.9)";ctx.font="13px 'Courier New',monospace";
+    ctx.fillText("couldn't reach today's board",W/2,H*0.62);
+    ctx.fillStyle="rgba(170,195,210,.7)";ctx.font="11px 'Courier New',monospace";
+    ctx.fillText("check your connection and reload",W/2,H*0.62+18);
+  }else{
+    const n=Math.floor(flick*2)%4;
+    ctx.fillStyle="rgba(150,200,225,.75)";ctx.font="13px 'Courier New',monospace";
+    ctx.fillText("chipping the ice"+".".repeat(n),W/2,H*0.62);
+  }
+  ctx.restore();
+}
+
 function render(){
+  if(boardState!=='ready'){ loadingScreen(); return; }   // no half-drawn board, ever
   ctx.save();
   if(shake>0){ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);shake*=0.86;if(shake<0.3)shake=0;}
   bgDraw();rail(railX0,"L");rail(railX1,"R");holesDraw();bar();
@@ -515,7 +578,8 @@ function frame(now){
   while(acc>=STEP){update();acc-=STEP;}
   render();
 }
-layout();                 // railX0/yTop must exist before frame 1 (init() is async)
+resize();                 // size to the REAL viewport before frame 1. init() is async, so
+                          // waiting for it renders the board at the 440x660 default first.
 addEventListener("resize",resize);
 requestAnimationFrame(frame);
 
@@ -534,7 +598,6 @@ async function submitScore():Promise<void>{
 }
 
 function shareText():string{
-  const mins=Math.floor(secsNext/3600)  // not used but keeps countdown fresh
   return "\uD83E\uDDCA Daily Thaw #"+String(puzzleNo).padStart(3,"0")+"  "+score+"/"+ROUNDS+
     "  \u00b7  banked "+bank.toFixed(1)+"s"+(myRank?"  \u00b7  rank #"+myRank:"")
 }
@@ -547,7 +610,7 @@ async function doComment():Promise<void>{
 }
 
 async function doShare():Promise<void>{
-  const txt=shareText()+"\n\nplay: r/daily_thaw_dev"
+  const txt=shareText()+"\n\nplay: r/DailyThaw"
   try{
     if(navigator.share){await navigator.share({text:txt})}
     else{await navigator.clipboard.writeText(txt); shareToast=performance.now()}
@@ -560,6 +623,9 @@ async function init():Promise<void>{
     barFric=rsp.board.barFric; iceLvl=rsp.board.iceLvl
     HOLES=rsp.board.holes.map(h=>({...h})); TARGET_SEQ=rsp.board.targetSeq
     curDay=rsp.board.day; puzzleNo=rsp.puzzle; secsNext=rsp.secondsUntilNext; yourBest=rsp.yourBest
+    boardState='ready'
+  }else{
+    boardState='error'      // never hang on a blank canvas — say so and offer a retry
   }
   resize(); reset()
 }

@@ -1,13 +1,3 @@
-/**
- * Two-key ranking, stored as one composite number so a single Redis sorted set
- * gives us "most holes first, fastest time breaks ties".
- *
- *   rank key 1: holesSunk   (0..5)   — primary
- *   rank key 2: bankedMs    (higher) — tie-break
- *
- * bankedMs can never exceed ROUNDS * ROUND_TIME * 1000 = 300_000, which is far
- * below the 10_000_000 multiplier, so the holes term always dominates.
- */
 import {ROUNDS, ROUND_TIME, PENALTY, roundTime, maxBankedSec} from './board.ts'
 
 export const HOLE_WEIGHT = 10_000_000;
@@ -32,12 +22,6 @@ export function decompose(score: number): { holesSunk: number; bankedMs: number 
   };
 }
 
-/**
- * Anti-cheat, tier 1: sanity caps.
- * The seed is public and the client is untrusted, so a naive endpoint accepts
- * {"holesSunk": 999}. These bounds reject anything physically impossible.
- * They do NOT stop a determined cheater — see note at the bottom.
- */
 export function validateRun(run: Run, today: string, iceLvl: number): { ok: true } | { ok: false; reason: string } {
   if (run.day !== today) return { ok: false, reason: 'stale or future day' };
 
@@ -55,9 +39,7 @@ export function validateRun(run: Run, today: string, iceLvl: number): { ok: true
   if (run.bankedMs > maxBankedSec(run.holesSunk, iceLvl) * 1000)
     return { ok: false, reason: 'banked more time than cleared targets allow' };
 
-  // Each cleared round consumes at least the time it took; each penalty burns 5s.
-  // Total wall clock must at least cover (time spent) = (rounds attempted budget) - banked.
-  const minElapsedMs = Math.max(0, run.holesSunk * 1000 - run.bankedMs);
+  const minElapsedMs = run.holesSunk * 1000;
   if (run.elapsedMs < minElapsedMs)
     return { ok: false, reason: 'elapsed too short for claimed result' };
 
@@ -72,12 +54,3 @@ export function validateRun(run: Run, today: string, iceLvl: number): { ok: true
 
   return { ok: true };
 }
-
-/**
- * NOTE ON ANTI-CHEAT (be honest in the Devpost writeup):
- * Tier 1 (implemented) = sanity caps + one-best-score-per-user-per-day + rate limit.
- * Tier 2 (not implemented) = server replays the run from an input log and recomputes
- *   the score using the same fixed-timestep physics. Our physics IS deterministic and
- *   fixed-step, so this is feasible — the risk is float divergence between browser and
- *   server. Ship tier 1; mention tier 2 as designed-for.
- */

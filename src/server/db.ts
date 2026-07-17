@@ -1,21 +1,7 @@
 import {redis} from '@devvit/web/server'
 import type {Best} from '../shared/api.ts'
-import {ROUNDS, ROUND_TIME} from '../shared/board.ts'
-
-/** holesSunk dominates; bankedMs breaks ties. One sorted set, two-key ranking. */
-const HOLE_WEIGHT = 10_000_000
-export const MAX_BANKED_MS = ROUNDS * ROUND_TIME * 1000
-
-export function composite(holesSunk: number, bankedMs: number): number {
-  return holesSunk * HOLE_WEIGHT + Math.min(bankedMs, MAX_BANKED_MS)
-}
-
-export function decompose(score: number): Best {
-  return {
-    holesSunk: Math.floor(score / HOLE_WEIGHT),
-    bankedMs: score % HOLE_WEIGHT,
-  }
-}
+import {composite, decompose, MAX_BANKED_MS} from '../shared/score.ts'
+export {composite, decompose, MAX_BANKED_MS}
 
 const TTL = 60 * 60 * 24 * 14 // keep two weeks of boards
 

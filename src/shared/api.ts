@@ -1,8 +1,3 @@
-/**
- * Endpoints are matched with `reqMsg.url?.slice(1)`, so these values carry NO
- * leading slash even though the wire path does (`/api/daily`).
- * Devvit requires every server endpoint to live under `/api/` or `/internal/`.
- */
 export enum Endpoint {
   Daily = 'api/daily',
   Score = 'api/score',
